@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Masjid Pro Premium</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+<style>
+body{
+margin:0;
+font-family:'Inter',sans-serif;
+background:#eef2f6;
+overflow:hidden;
+}
+
+/* HEADER */
+.header{
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:20px 40px;
+background:white;
+box-shadow:0 4px 20px rgba(0,0,0,0.05);
+}
+
+#mosqueName{
+font-weight:800;
+font-size:32px;
+color:#1b4f72;
+}
+
+/* MAIN */
+.background-section{
+display:flex;
+height:60vh;
+padding:30px 40px;
+gap:30px;
+}
+
+/* CLOCK */
+.clock-wrapper{
+background:white;
+flex:1;
+border-radius:20px;
+box-shadow:0 8px 30px rgba(0,0,0,0.08);
+display:flex;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+position:relative;
+}
+
+.big-clock{
+font-size:6vw;
+font-weight:800;
+color:#154360;
+letter-spacing:4px;
+}
+
+.countdown{
+margin-top:10px;
+font-size:1.5vw;
+color:#2874a6;
+}
+
+/* PETUGAS */
+.petugas-box{
+margin-top:20px;
+background:#1f618d;
+color:white;
+padding:15px 25px;
+border-radius:15px;
+font-size:1.2vw;
+display:none;
+width:80%;
+text-align:center;
+}
+
+/* IMAGE */
+.background-image{
+flex:2;
+border-radius:20px;
+background-size:cover;
+background-position:center;
+background-repeat:no-repeat;
+box-shadow:0 8px 30px rgba(0,0,0,0.08);
+}
+
+/* PRAYER */
+.prayer-bar{
+display:flex;
+justify-content:space-between;
+padding:20px 40px;
+gap:15px;
+}
+
+.bar-item{
+flex:1;
+background:#1f618d;
+color:white;
+border-radius:16px;
+padding:20px;
+text-align:center;
+transition:0.3s;
+}
+
+.bar-time{
+font-size:1.8vw;
+font-weight:800;
+margin-top:8px;
+}
+
+.active{
+background:#f4d03f;
+color:black;
+}
+
+/* HADIS */
+.running-bar{
+position:fixed;
+bottom:0;
+width:100%;
+background:#154360;
+height:70px;
+display:flex;
+align-items:center;
+justify-content:center;
+overflow:hidden;
+}
+
+.running-text{
+font-size:1.4vw;
+font-weight:600;
+text-align:center;
+width:100%;
+opacity:0;
+transition:opacity 1s ease-in-out;
+position:absolute;
+color:white;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <div id="mosqueName">Masjid</div>
+  <div id="tanggal"></div>
+</div>
+
+<div class="background-section">
+  <div class="clock-wrapper">
+    <div id="clock" class="big-clock"></div>
+    <div id="countdown" class="countdown"></div>
+
+    <div id="petugasBox" class="petugas-box">
+      <div id="khatibText"></div>
+      <div id="imamText"></div>
+      <div id="muadzinText"></div>
+    </div>
+  </div>
+
+  <div id="bgSection" class="background-image"></div>
+</div>
+
+<div id="prayerBar" class="prayer-bar"></div>
+
+<div class="running-bar">
+  <div id="runningText" class="running-text"></div>
+</div>
+
+<script>
+const SUPABASE_URL="https://muzzbojfezznhjfwdqaa.supabase.co";
+const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11enpib2pmZXp6bmhqZndkcWFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4MTUzNDYsImV4cCI6MjA4NzM5MTM0Nn0._6VGaROBeEneDcuYHPtmwaXsrfMuOmLENd-MCO107ag";
+
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+
+let prayerData={}, nextPrayer="", nextTime="";
+let hadisList=[], hadisIndex=0;
+let slideDuration = 8000;
+let realtimeChannel = null;
+
+const namaID={
+Fajr:"Subuh",
+Dhuhr:"Dzuhur",
+Asr:"Ashar",
+Maghrib:"Maghrib",
+Isha:"Isya"
+};
+
+/* ================= SETTINGS ================= */
+
+async function loadSettings(){
+const { data, error } = await supabaseClient
+.from("settings")
+.select("*")
+.limit(1)
+.single();
+
+if(error || !data){
+console.log("Settings tidak ditemukan");
+loadPrayerTimes("Jambi");
+return;
+}
+
+mosqueName.innerText=data.mosque_name||"Masjid";
+
+hadisList=(data.running_text||"").split("|").map(t=>t.trim());
+hadisIndex=0;
+
+slideDuration=(data.slide_duration||8)*1000;
+mulaiSlideHadis();
+
+if(data.background_url){
+bgSection.style.backgroundImage=
+"url('"+data.background_url+"')";
+}
+
+const hariIniJumat=new Date().getDay()===5;
+const paksaJumat=data.force_jumat===true;
+
+if(hariIniJumat||paksaJumat){
+petugasBox.style.display="block";
+khatibText.innerText="Khatib: "+(data.khatib||"-");
+imamText.innerText="Imam: "+(data.imam||"-");
+muadzinText.innerText="Muadzin: "+(data.muadzin||"-");
+}else{
+petugasBox.style.display="none";
+}
+
+loadPrayerTimes(data.city||"Jambi");
+}
+
+/* ================= REALTIME ================= */
+
+function setupRealtime(){
+if(realtimeChannel){
+supabaseClient.removeChannel(realtimeChannel);
+}
+
+realtimeChannel = supabaseClient
+.channel('settings-realtime')
+.on(
+'postgres_changes',
+{ event:'*', schema:'public', table:'settings' },
+() => loadSettings()
+)
+.subscribe();
+}
+
+/* ================= PRAYER ================= */
+
+async function loadPrayerTimes(city){
+try{
+const res=await fetch(
+`https://api.aladhan.com/v1/timingsByCity?city=${city}&country=Indonesia&method=11`
+);
+const json=await res.json();
+prayerData=json.data.timings;
+renderBar();
+findNextPrayer();
+}catch(err){
+console.log("API gagal",err);
+}
+}
+
+function renderBar(){
+const keys=["Fajr","Dhuhr","Asr","Maghrib","Isha"];
+let html="";
+keys.forEach(k=>{
+html+=`
+<div class="bar-item" id="item-${k}">
+<div>${namaID[k]}</div>
+<div class="bar-time">${prayerData[k]||"--:--"}</div>
+</div>`;
+});
+prayerBar.innerHTML=html;
+}
+
+function findNextPrayer(){
+const now=new Date();
+const current=now.getHours()*60+now.getMinutes();
+const keys=["Fajr","Dhuhr","Asr","Maghrib","Isha"];
+
+for(let k of keys){
+if(!prayerData[k]) continue;
+const [h,m]=prayerData[k].split(":");
+const total=parseInt(h)*60+parseInt(m);
+if(total>current){
+nextPrayer=namaID[k];
+nextTime=prayerData[k];
+highlight(k);
+break;
+}
+}
+}
+
+function highlight(name){
+document.querySelectorAll(".bar-item")
+.forEach(e=>e.classList.remove("active"));
+document.getElementById("item-"+name)?.classList.add("active");
+}
+
+/* ================= CLOCK ================= */
+
+function updateClock(){
+clock.innerText=new Date().toLocaleTimeString("id-ID");
+}
+setInterval(updateClock,1000);
+
+function updateCountdown(){
+if(!nextTime) return;
+const now=new Date();
+const [h,m]=nextTime.split(":");
+const target=new Date();
+target.setHours(h,m,0);
+const diff=target-now;
+if(diff<=0){findNextPrayer();return;}
+const h2=Math.floor(diff/1000/60/60);
+const m2=Math.floor(diff/1000/60%60);
+const s2=Math.floor(diff/1000%60);
+countdown.innerText=
+"Menuju "+nextPrayer+" : "+h2+"j "+m2+"m "+s2+"d";
+}
+setInterval(updateCountdown,1000);
+
+function updateDate(){
+tanggal.innerText=
+new Date().toLocaleDateString("id-ID",
+{weekday:"long", day:"numeric", month:"long", year:"numeric"});
+}
+setInterval(updateDate,1000);
+
+/* ================= HADIS ================= */
+
+function mulaiSlideHadis(){
+if(hadisList.length===0) return;
+runningText.innerText=hadisList[hadisIndex];
+runningText.style.opacity=1;
+setTimeout(()=>{
+runningText.style.opacity=0;
+setTimeout(()=>{
+hadisIndex=(hadisIndex+1)%hadisList.length;
+mulaiSlideHadis();
+},1000);
+},slideDuration);
+}
+
+/* INIT */
+loadSettings();
+setupRealtime();
+</script>
+
+</body>
+</html>
